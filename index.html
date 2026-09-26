@@ -351,12 +351,13 @@
                 <h2 style="margin-top:18px;">🆕 방 만들기</h2>
                 <div class="lobby-field">
                     <label for="lobby-base-bet">기본 판돈</label>
-                    <select id="lobby-base-bet">
+                    <select id="lobby-base-bet" onchange="App.handleBaseBetSelect(this)">
                         <option value="1000">1,000원</option>
                         <option value="5000">5,000원</option>
                         <option value="10000">10,000원</option>
                         <option value="25000">25,000원</option>
                         <option value="50000">50,000원</option>
+                        <option value="custom">사용자 지정</option>
                     </select>
                 </div>
                 <button class="lobby-btn" onclick="App.createRoom()">방 만들기</button>
@@ -386,12 +387,13 @@
             </div>
             <div class="lobby-card" id="host-settings-card" style="display:none;width:min(420px, calc(100vw - 32px));">
                 <h2>기본 판돈</h2>
-                <select id="room-base-bet" onchange="App.updateRoomBaseBet(this.value)">
+                <select id="room-base-bet" onchange="App.handleBaseBetSelect(this)">
                     <option value="1000">1,000원</option>
                     <option value="5000">5,000원</option>
                     <option value="10000">10,000원</option>
                     <option value="25000">25,000원</option>
                     <option value="50000">50,000원</option>
+                    <option value="custom">사용자 지정</option>
                 </select>
                 <button class="lobby-btn" id="start-game-btn" onclick="App.startGame()" style="margin-top:14px;">게임 시작 (최소 2명)</button>
             </div>
@@ -414,12 +416,13 @@
             <div id="top-hud">
                 <div id="next-bet-setting" class="interactive" style="display:none;">
                     <span class="next-bet-label">다음판 기본 판돈</span>
-                    <select id="next-round-base-bet" onchange="App.updateRoomBaseBet(this.value)">
+                    <select id="next-round-base-bet" onchange="App.handleBaseBetSelect(this)">
                         <option value="1000">1,000원</option>
                         <option value="5000">5,000원</option>
                         <option value="10000">10,000원</option>
                         <option value="25000">25,000원</option>
                         <option value="50000">50,000원</option>
+                        <option value="custom">사용자 지정</option>
                     </select>
                     <div id="next-bet-note">변경사항은 다음 라운드부터 적용됩니다</div>
                 </div>
@@ -439,6 +442,20 @@
                 <button class="bet-btn quarter" onclick="App.bet('quarter')">쿼터</button>
                 <button class="bet-btn allin" onclick="App.bet('allin')">올인</button>
                 <button class="bet-btn die" onclick="App.bet('die')">다이</button>
+            </div>
+        </div>
+
+        <!-- 사용자 지정 기본 판돈 팝업 -->
+        <div id="custom-bet-modal" class="interactive">
+            <div class="custom-bet-dialog">
+                <h2>사용자 지정 기본 판돈</h2>
+                <p>원하는 기본 판돈을 직접 입력하세요.</p>
+                <input id="custom-bet-input" type="number" min="100" step="100" placeholder="예: 15000">
+                <div id="custom-bet-error"></div>
+                <div class="custom-bet-actions">
+                    <button id="custom-bet-cancel" type="button" onclick="App.cancelCustomBet()">취소</button>
+                    <button id="custom-bet-confirm" type="button" onclick="App.confirmCustomBet()">확인</button>
+                </div>
             </div>
         </div>
 
@@ -1047,6 +1064,82 @@
             this.db.ref('rooms/' + this.roomId + '/meta/baseBet').set(Number(value));
         },
 
+        // ---------------- 기본 판돈 select의 "사용자 지정" 처리 ----------------
+        lastBaseBetValue: {},
+
+        syncBaseBetSelect(id, value) {
+            const sel = document.getElementById(id);
+            if (!sel || value === undefined || value === null) return;
+            const strVal = String(value);
+            const exists = Array.from(sel.options).some(o => o.value === strVal);
+            if (!exists) {
+                let customOpt = sel.querySelector('option[data-custom="1"]');
+                if (!customOpt) {
+                    customOpt = document.createElement('option');
+                    customOpt.dataset.custom = '1';
+                    sel.appendChild(customOpt);
+                }
+                customOpt.value = strVal;
+                customOpt.textContent = `${Number(strVal).toLocaleString()}원 (사용자 지정)`;
+            }
+            sel.value = strVal;
+            this.lastBaseBetValue[id] = strVal;
+        },
+
+        handleBaseBetSelect(selectEl) {
+            if (selectEl.value === 'custom') {
+                this.openCustomBetModal(selectEl);
+                return;
+            }
+            this.lastBaseBetValue[selectEl.id] = selectEl.value;
+            if (selectEl.id !== 'lobby-base-bet') this.updateRoomBaseBet(selectEl.value);
+        },
+
+        openCustomBetModal(selectEl) {
+            this._customBetTargetId = selectEl.id;
+            const input = document.getElementById('custom-bet-input');
+            input.value = '';
+            document.getElementById('custom-bet-error').textContent = '';
+            document.getElementById('custom-bet-modal').classList.add('open');
+            setTimeout(() => input.focus(), 50);
+        },
+
+        cancelCustomBet() {
+            const selectEl = document.getElementById(this._customBetTargetId);
+            if (selectEl) {
+                const customOpt = selectEl.querySelector('option[data-custom="1"]');
+                selectEl.value = (customOpt && this.lastBaseBetValue[selectEl.id] === customOpt.value)
+                    ? customOpt.value
+                    : (this.lastBaseBetValue[selectEl.id] || '1000');
+            }
+            document.getElementById('custom-bet-modal').classList.remove('open');
+        },
+
+        confirmCustomBet() {
+            const raw = document.getElementById('custom-bet-input').value.trim();
+            const err = document.getElementById('custom-bet-error');
+            const amount = Math.floor(Number(raw));
+            if (!raw || !Number.isFinite(amount) || amount < 100) {
+                err.textContent = '100원 이상의 숫자를 입력해주세요.';
+                return;
+            }
+            const selectEl = document.getElementById(this._customBetTargetId);
+            if (selectEl) {
+                let customOpt = selectEl.querySelector('option[data-custom="1"]');
+                if (!customOpt) {
+                    customOpt = document.createElement('option');
+                    customOpt.dataset.custom = '1';
+                    selectEl.appendChild(customOpt);
+                }
+                customOpt.value = String(amount);
+                customOpt.textContent = `${amount.toLocaleString()}원 (사용자 지정)`;
+                selectEl.value = String(amount);
+                this.lastBaseBetValue[selectEl.id] = String(amount);
+                if (selectEl.id !== 'lobby-base-bet') this.updateRoomBaseBet(amount);
+            }
+            document.getElementById('custom-bet-modal').classList.remove('open');
+        },
+
         // ---------------- 목록/메타 변경 처리 ----------------
         onPlayersUpdate() {
             // 호스트가 끊긴 경우 좌석 순서상 다음 접속자가 자동으로 호스트를 승계한다.
@@ -1077,8 +1170,7 @@
                 document.getElementById('game-ui').style.display = 'none';
                 document.getElementById('host-settings-card').style.display = this.isHost ? 'block' : 'none';
                 document.getElementById('waiting-hint').style.display = this.isHost ? 'none' : 'block';
-                const bbSel = document.getElementById('room-base-bet');
-                if (bbSel && this.meta.baseBet) bbSel.value = String(this.meta.baseBet);
+                this.syncBaseBetSelect('room-base-bet', this.meta.baseBet);
                 this.renderLobbyPlayerList();
             } else {
                 document.getElementById('room-screen').classList.remove('active');
@@ -1424,7 +1516,7 @@
             if (this.isHost) {
                 nextBetBox.style.display = 'flex';
                 const sel = document.getElementById('next-round-base-bet');
-                if (sel && document.activeElement !== sel && this.meta.baseBet) sel.value = String(this.meta.baseBet);
+                if (sel && document.activeElement !== sel) this.syncBaseBetSelect('next-round-base-bet', this.meta.baseBet);
             } else {
                 nextBetBox.style.display = 'none';
             }
